@@ -1173,3 +1173,185 @@ label {
 #sound-btn:hover {
     border-color: var(--muted);
 }
+
+/* GRAPHICS SETTINGS */
+.crt-filter {
+    filter: contrast(1.15) brightness(0.93) saturate(0.9);
+}
+
+.crt-filter #arena-inner {
+    filter: url(#crt-scanlines);
+}
+
+.high-contrast {
+    filter: contrast(1.6) saturate(1.1);
+}
+
+.high-contrast .btn,
+.high-contrast input,
+.high-contrast select {
+    border-width: 2px;
+}
+
+.high-contrast .btn-accent {
+    filter: brightness(1.2);
+}
+
+.reduced-motion * {
+    animation-duration: 0.01s !important;
+    transition-duration: 0.01s !important;
+}
+
+.reduced-motion .flickering,
+.reduced-motion .rgb-shift,
+.reduced-motion .frenzy-overlay,
+.reduced-motion .infection-overlay {
+    animation: none !important;
+}
+
+/* COLORBLIND MODES */
+.colorblind-deuteranopia {
+    filter: url(#deuteranopia-filter);
+}
+
+.colorblind-protanopia {
+    filter: url(#protanopia-filter);
+}
+
+.colorblind-tritanopia {
+    filter: url(#tritanopia-filter);
+}
+
+/* ACHIEVEMENT BADGES */
+#achievement-display {
+    padding: 0.5rem 0;
+}
+
+.achievement-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: help;
+    transition: all 0.2s;
+    font-size: 1.2rem;
+    position: relative;
+}
+
+.achievement-badge:hover {
+    border-color: var(--accent);
+    background: var(--surface);
+}
+
+.achievement-badge.locked {
+    opacity: 0.3;
+    font-size: 0.9rem;
+}
+
+.achievement-badge[data-locked='true']:hover::after {
+    content: attr(data-desc);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 0.3rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.5rem;
+    white-space: nowrap;
+    z-index: 100;
+}
+
+/* DASH MECHANIC */
+.dashing {
+    animation: dash-pulse 0.3s ease-out;
+    box-shadow: 0 0 20px rgba(68, 255, 204, 0.8);
+}
+
+@keyframes dash-pulse {
+    0% {
+        transform: scale(1);
+        filter: brightness(1.4);
+    }
+    100% {
+        transform: scale(1);
+        filter: brightness(1);
+    }
+}
+
+/* WEATHER EFFECTS */
+.fog-effect {
+    filter: blur(2px) brightness(0.8);
+}
+
+.fog-effect .player-el {
+    transition: opacity 0.3s;
+}
+
+.fog-effect .player-el[style*="left: 0"] {
+    opacity: 0.4;
+}
+
+.fog-effect #arena-inner {
+    background: radial-gradient(circle, rgba(200, 200, 200, 0) 0%, rgba(150, 150, 150, 0.15) 100%);
+}
+
+/* TUTORIAL CONTENT */
+.tutorial-section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.6rem;
+    margin-bottom: 0.8rem;
+}
+
+.tutorial-section h3 {
+    color: var(--accent);
+    font-family: 'Orbitron', sans-serif;
+    margin-bottom: 0.4rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+}
+
+.tutorial-section p {
+    margin: 0.3rem 0;
+}
+
+.btn-info {
+    background: var(--info);
+    color: #002233;
+}
+
+.btn-info:hover {
+    background: #00e8ff;
+}
+
+/* AI BOT INDICATOR */
+.ai-player {
+    opacity: 0.85;
+}
+
+.ai-player::after {
+    content: '🤖';
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    font-size: 0.6rem;
+}
+
+/* PRACTICE MODE */
+.practice-target {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border: 2px solid var(--warn);
+    border-radius: 50%;
+    opacity: 0.6;
+    z-index: 2;
+}

@@ -41,11 +41,198 @@ const MODE_DESCS = {
     classic: 'Classic tag. Chase and tag others to score. Highest score wins.',
     infection: 'IT infects others. Last survivor wins. Infected can tag uninfected.',
     potato: 'IT is the hot potato — hold it too long and you explode. Survive longest to win.',
-    assassin: 'Each player has a secret target. Tag only your target to score. Others don\'t count.'
+    assassin: 'Each player has a secret target. Tag only your target to score. Others don\'t count.',
+    team2v2: 'Teams of 2 compete. Tag opponents to score. First team to 10 wins.',
+    ctf: 'Grab enemy flag while protecting yours. Return enemy flag to your zone to score.',
+    koth: 'Both teams fight to hold the King of the Hill zone. Hold it to rack up points.'
 };
 
 const ZONE_TYPES = ['danger', 'boost', 'slow'];
 const GLITCH_CHARS = '▓░▒█▄▀■□●○◆◇★☆♦♣♠♥';
+
+// ============================================
+// AI PLAYER CLASS
+// ============================================
+class AIPlayer {
+    constructor(difficulty = 'medium') {
+        this.difficulty = difficulty;
+        this.state = 'neutral'; // chase, flee, collect, patrol
+        this.target = null;
+        this.lastDecision = 0;
+        this.decisionInterval = this.getDecisionInterval();
+    }
+
+    getDecisionInterval() {
+        const intervals = { easy: 400, medium: 250, hard: 120, nightmare: 50 };
+        return intervals[this.difficulty] || 250;
+    }
+
+    getReactionTime() {
+        const times = { easy: 300, medium: 150, hard: 80, nightmare: 30 };
+        return times[this.difficulty] || 150;
+    }
+
+    decide(player, gameState, arena) {
+        const now = Date.now();
+        if (now - this.lastDecision < this.getReactionTime()) return { dx: 0, dy: 0 };
+        this.lastDecision = now;
+
+        const itPlayers = gameState.players.filter(p => p.isIt && !p.eliminated);
+        const powerups = pickups.filter(p => p.active);
+        const runners = gameState.players.filter(p => !p.isIt && !p.eliminated && p.id !== player.id);
+
+        if (player.isIt || (gameState.mode === 'infection' && player.infected)) {
+            return this.decideAttacker(player, runners, gameState, arena);
+        } else {
+            return this.decideEvader(player, itPlayers, powerups, gameState, arena);
+        }
+    }
+
+    decideAttacker(player, targets, gameState, arena) {
+        if (targets.length === 0) return { dx: 0, dy: 0 };
+
+        let bestTarget = targets[0];
+        let minDist = Math.hypot(bestTarget.x - player.x, bestTarget.y - player.y);
+
+        for (let i = 1; i < targets.length; i++) {
+            const dist = Math.hypot(targets[i].x - player.x, targets[i].y - player.y);
+            if (dist < minDist) {
+                minDist = dist;
+                bestTarget = targets[i];
+            }
+        }
+
+        return this.moveToward(player, bestTarget, minDist < 150 ? 1.2 : 1.0);
+    }
+
+    decideEvader(player, threats, powerups, gameState, arena) {
+        if (threats.length === 0) {
+            if (powerups.length > 0 && this.difficulty !== 'easy') {
+                const closest = this.findClosest(powerups, player);
+                return this.moveToward(player, closest, 0.6);
+            }
+            return { dx: 0, dy: 0 };
+        }
+
+        const threat = threats[0];
+        const dist = Math.hypot(threat.x - player.x, threat.y - player.y);
+
+        if (dist < 200) {
+            // Flee
+            const dx = player.x - threat.x;
+            const dy = player.y - threat.y;
+            const len = Math.hypot(dx, dy) || 1;
+            return { dx: dx / len, dy: dy / len };
+        } else if (powerups.length > 0 && this.difficulty !== 'easy') {
+            // Go for powerups
+            const closest = this.findClosest(powerups, player);
+            return this.moveToward(player, closest, 0.6);
+        } else {
+            // Patrol randomly
+            return { dx: (Math.random() - 0.5), dy: (Math.random() - 0.5) };
+        }
+    }
+
+    findClosest(targets, player) {
+        return targets.reduce((closest, target) => {
+            const d1 = Math.hypot(target.x - player.x, target.y - player.y);
+            const d2 = Math.hypot(closest.x - player.x, closest.y - player.y);
+            return d1 < d2 ? target : closest;
+        });
+    }
+
+    moveToward(player, target, speedMult = 1.0) {
+        const dx = target.x - player.x;
+        const dy = target.y - player.y;
+        const len = Math.hypot(dx, dy) || 1;
+        return { dx: (dx / len) * speedMult, dy: (dy / len) * speedMult };
+    }
+}
+
+// ============================================
+// ACHIEVEMENT SYSTEM
+// ============================================
+const ACHIEVEMENTS = [
+    { id: 'first_tag', icon: '🏹', title: 'FIRST BLOOD', desc: 'Tag a player for the first time' },
+    { id: 'triple_streak', icon: '🔥', title: 'HOT STARTER', desc: 'Get 3 tags in a row' },
+    { id: 'five_streak', icon: '🌟', title: 'ON FIRE', desc: 'Get 5 tags without dying' },
+    { id: 'ten_streak', icon: '👑', title: 'LEGENDARY', desc: 'Get 10 tags in a row' },
+    { id: 'collector', icon: '🧲', title: 'COLLECTOR', desc: 'Collect 10 powerups in one round' },
+    { id: 'survivor', icon: '💪', title: 'SURVIVOR', desc: 'Last alive in Infection mode' },
+    { id: 'ghost_master', icon: '👻', title: 'PHANTOM', desc: 'Use Ghost Mode 5 times' },
+    { id: 'shield_blocker', icon: '🛡️', title: 'DEFENDER', desc: 'Block 3 tags with shields' },
+    { id: 'assassin_ace', icon: '🎯', title: 'SNIPER', desc: 'Win an Assassin round' },
+    { id: 'chaos_master', icon: '⚡', title: 'CHAOS AGENT', desc: 'Experience 10 glitches in one round' },
+    { id: 'speedrunner', icon: '💨', title: 'SPEEDSTER', desc: 'Get caught never in a classic round' },
+    { id: 'marathon', icon: '🏃', title: 'MARATHON', desc: 'Play 10 rounds' },
+];
+
+class AchievementSystem {
+    constructor() {
+        this.unlocked = this.loadUnlocked();
+        this.stats = this.loadStats();
+    }
+
+    loadUnlocked() {
+        const saved = localStorage.getItem('glitch_tag_achievements');
+        return saved ? JSON.parse(saved) : {};
+    }
+
+    loadStats() {
+        const saved = localStorage.getItem('glitch_tag_stats');
+        return saved ? JSON.parse(saved) : {
+            totalTags: 0,
+            roundsPlayed: 0,
+            pickupsCollected: 0,
+            ghostModesUsed: 0,
+            shieldsBlocked: 0,
+        };
+    }
+
+    save() {
+        localStorage.setItem('glitch_tag_achievements', JSON.stringify(this.unlocked));
+        localStorage.setItem('glitch_tag_stats', JSON.stringify(this.stats));
+    }
+
+    unlock(id) {
+        if (!this.unlocked[id]) {
+            this.unlocked[id] = { unlockedAt: new Date().toISOString() };
+            this.save();
+            return true;
+        }
+        return false;
+    }
+
+    checkAchievements(matchResults) {
+        const unlocked = [];
+
+        if (matchResults.tags > 0 && this.stats.totalTags === 0) {
+            if (this.unlock('first_tag')) unlocked.push('FIRST BLOOD');
+        }
+        if (matchResults.longestStreak >= 3 && !this.unlocked['triple_streak']) {
+            if (this.unlock('triple_streak')) unlocked.push('HOT STARTER');
+        }
+        if (matchResults.longestStreak >= 5 && !this.unlocked['five_streak']) {
+            if (this.unlock('five_streak')) unlocked.push('ON FIRE');
+        }
+        if (matchResults.longestStreak >= 10 && !this.unlocked['ten_streak']) {
+            if (this.unlock('ten_streak')) unlocked.push('LEGENDARY');
+        }
+        if (matchResults.pickups >= 10 && !this.unlocked['collector']) {
+            if (this.unlock('collector')) unlocked.push('COLLECTOR');
+        }
+        if (matchResults.mode === 'infection' && matchResults.survived && !this.unlocked['survivor']) {
+            if (this.unlock('survivor')) unlocked.push('SURVIVOR');
+        }
+        if (matchResults.mode === 'assassin' && matchResults.won && !this.unlocked['assassin_ace']) {
+            if (this.unlock('assassin_ace')) unlocked.push('SNIPER');
+        }
+
+        return unlocked;
+    }
+}
+
+let achievementSystem = new AchievementSystem();
 
 // ============================================
 // STATE
@@ -60,6 +247,13 @@ let sessionLB = {}; // name->total score across rounds
 let soundEnabled = true;
 let heatCtx = null;
 let titleGlitchInterval = null;
+let tutorialMode = false;
+let graphicsPreset = 'normal';
+let colorblindMode = 'none';
+let aiPlayers = {}; // id -> AIPlayer instance
+let keyPressTimings = {}; // track double-tap detection
+let currentWeather = null;
+let weatherInterval = null;
 
 // ============================================
 // DOM Helpers
@@ -154,6 +348,95 @@ $('sound-btn').addEventListener('click', () => {
 });
 
 // ============================================
+// GRAPHICS SETTINGS
+// ============================================
+$('graphics-preset').addEventListener('change', (e) => {
+    graphicsPreset = e.target.value;
+    applyGraphicsSettings();
+});
+
+$('colorblind-mode').addEventListener('change', (e) => {
+    colorblindMode = e.target.value;
+    applyGraphicsSettings();
+});
+
+function applyGraphicsSettings() {
+    document.body.classList.remove('crt-filter', 'high-contrast', 'reduced-motion');
+    document.body.classList.remove('colorblind-deuteranopia', 'colorblind-protanopia', 'colorblind-tritanopia');
+    
+    if (graphicsPreset === 'crt') document.body.classList.add('crt-filter');
+    else if (graphicsPreset === 'high-contrast') document.body.classList.add('high-contrast');
+    else if (graphicsPreset === 'reduced-motion') document.body.classList.add('reduced-motion');
+    
+    if (colorblindMode !== 'none') document.body.classList.add('colorblind-' + colorblindMode);
+    
+    localStorage.setItem('glitch_tag_graphics', JSON.stringify({ graphicsPreset, colorblindMode }));
+}
+
+function loadGraphicsSettings() {
+    const saved = localStorage.getItem('glitch_tag_graphics');
+    if (saved) {
+        const { graphicsPreset: gp, colorblindMode: cm } = JSON.parse(saved);
+        graphicsPreset = gp || 'normal';
+        colorblindMode = cm || 'none';
+        $('graphics-preset').value = graphicsPreset;
+        $('colorblind-mode').value = colorblindMode;
+        applyGraphicsSettings();
+    }
+}
+
+// ============================================
+// TUTORIAL MODE
+// ============================================
+$('tutorial-btn').addEventListener('click', showTutorial);
+$('close-tutorial-btn').addEventListener('click', () => $('tutorial-modal').style.display = 'none');
+$('practice-btn').addEventListener('click', startPracticeMode);
+
+function showTutorial() {
+    const content = $('tutorial-content');
+    const sections = [
+        { title: 'OBJECTIVE', text: 'Classic Tag: Chase and tag others to become IT. The tagger scores points. Last to be caught wins.' },
+        { title: 'CONTROLS', text: 'P1: WASD | P2: ARROWS | P3: IJKL | P4: NUMPAD 8456 — Move your player around the arena.' },
+        { title: 'TAG MECHANICS', text: 'Touch another player to tag them. If you\'re IT, you score points by tagging others. Avoid being tagged!' },
+        { title: 'POWERUPS', text: '🛡️ Shield blocks 1 tag | ❄️ Freeze stops others | 👻 Ghost phase through walls | 🧲 Magnet pull runners | 💣Bomb force IT swap | 🔫 Shot fire a tag bullet | 🪄 Decoy leave a fake copy' },
+        { title: 'ACHIEVEMENTS', text: 'Unlock badges by hitting milestones: First tag, 3-streak, 5-streak, 10-streak, collector, survivor, etc. Check your profile!' },
+        { title: 'GAME MODES', text: 'Infection: Last survivor wins | Hot Potato: Hold the potato too long = eliminated | Assassin: Tag only your target' },
+        { title: 'GLITCHES', text: 'Random events shake up the game: inverted controls, teleports, speed boosts, position swaps, and more chaos!' },
+    ];
+    
+    content.innerHTML = sections.map(s => `
+        <div class="tutorial-section">
+            <h3>${s.title}</h3>
+            <p>${s.text}</p>
+        </div>
+    `).join('');
+    
+    $('tutorial-modal').style.display = 'flex';
+}
+
+function startPracticeMode() {
+    // Initialize practice mode against stationary targets
+    $('tutorial-modal').style.display = 'none';
+    tutorialMode = true;
+    players = [{ name: 'YOU', scheme: 'wasd', net: false, id: Date.now() }];
+    // Add stationary target dummies
+    for (let i = 0; i < 2; i++) {
+        players.push({ 
+            name: `TARGET_${i+1}`, 
+            scheme: 'ai', 
+            net: false, 
+            id: 'practice_' + i, 
+            ai: true, 
+            aiDifficulty: 'easy',
+            isPracticeTarget: true
+        });
+    }
+    updateLobby();
+    const seed = Math.random();
+    startGame(seed, 'classic', 'low', 60, false, '');
+}
+
+// ============================================
 // LOBBY FUNCTIONS
 // ============================================
 function renderSlots() {
@@ -190,13 +473,16 @@ function renderSlots() {
 function updateLobby() {
     renderSlots();
     const total = players.length + Object.keys(netPlayers).length;
+    const aiCount = players.filter(p => p.ai).length;
+    $('ai-count').textContent = aiCount > 0 ? `${aiCount} bot${aiCount !== 1 ? 's' : ''} added` : '0 bots';
     $('start-btn').disabled = total < 2;
     $('lobby-msg').textContent = total >= 2 ? `${total} player${total > 1 ? 's' : ''} ready` : 'Need at least 2 players';
-    const used = players.map(p => p.scheme);
+    const used = players.map(p => p.scheme).filter(s => s !== 'ai');
     Array.from($('control-scheme').options).forEach(o => o.disabled = used.includes(o.value));
     const av = Array.from($('control-scheme').options).find(o => !o.disabled);
     if (av) $('control-scheme').value = av.value;
     renderLeaderboard();
+    renderAchievements();
 }
 
 $('add-local-btn').addEventListener('click', () => {
@@ -209,6 +495,17 @@ $('add-local-btn').addEventListener('click', () => {
     }
     players.push({ name, scheme, net: false, id: Date.now() + Math.random() });
     $('player-name-input').value = '';
+    updateLobby();
+});
+
+$('add-ai-btn').addEventListener('click', () => {
+    if (players.length + Object.keys(netPlayers).length >= 8) return;
+    const difficulty = $('ai-difficulty').value;
+    const names = ['ECHO', 'VOLT', 'NEXUS', 'CIPHER', 'SURGE', 'PULSE'];
+    const usedNames = players.map(p => p.name);
+    const name = names.find(n => !usedNames.includes(n)) || `AI${players.length + 1}`;
+    const id = 'ai_' + Date.now() + Math.random();
+    players.push({ name, scheme: 'ai', net: false, id, ai: true, aiDifficulty: difficulty });
     updateLobby();
 });
 
@@ -232,6 +529,17 @@ function renderLeaderboard() {
       <span>${i === 0 ? '🏆' : i + 1 + '.'} ${name}</span>
       <span>${sessionLB[name]} pts</span>
     </div>`).join('');
+}
+
+function renderAchievements() {
+    const display = $('achievement-display');
+    const unlockedCount = Object.keys(achievementSystem.unlocked).length;
+    $('achievement-count').textContent = `(${unlockedCount}/${ACHIEVEMENTS.length})`;
+    
+    display.innerHTML = ACHIEVEMENTS.map(ach => {
+        const unlocked = achievementSystem.unlocked[ach.id];
+        return `<div class="achievement-badge ${!unlocked ? 'locked' : ''}" data-locked="${!unlocked}" data-desc="${ach.title}: ${ach.desc}" title="${ach.title}">${unlocked ? ach.icon : '?'}</div>`;
+    }).join('');
 }
 
 // ============================================
@@ -358,14 +666,22 @@ function startGame(seed, mode, intensity, duration, pupsOn, theme) {
         allPlayers.forEach((_, i) => { targets[i] = shuffled[(i + 1) % allPlayers.length]; });
     }
 
+    // Assign teams for team modes
+    let teams = {};
+    const isTeamMode = ['team2v2', 'ctf', 'koth'].includes(mode);
+    if (isTeamMode) {
+        allPlayers.forEach((_, i) => { teams[i] = i % 2; }); // Alternate team assignment
+    }
+
     gameState = {
         players: allPlayers.map((p, i) => ({
             ...p,
             x: (0.08 + (i % 4) * 0.22) * arena.w,
             y: (0.18 + Math.floor(i / 4) * 0.58) * arena.h,
-            isIt: i === 0,
+            isIt: i === 0 && !isTeamMode,
             score: 0,
             colorIdx: i,
+            team: teams[i] || null,
             lastTagTime: 0,
             streak: 0,
             tagsMade: 0,
@@ -382,6 +698,10 @@ function startGame(seed, mode, intensity, duration, pupsOn, theme) {
             survivedMs: 0,
             assassinTarget: targets[i] !== undefined ? targets[i] : null,
             rageLevel: 0,
+            dashCooldown: 0,
+            isDashing: false,
+            dashDir: { x: 0, y: 0 },
+            momentum: { x: 0, y: 0 },
         })),
         timeLeft: duration,
         intensity,
@@ -392,7 +712,17 @@ function startGame(seed, mode, intensity, duration, pupsOn, theme) {
         frenzy: false,
         potatoHolder: 0,
         potatoTimer: mode === 'potato' ? 15 : 0,
+        teamScores: { 0: 0, 1: 0 },
+        isTeamMode: isTeamMode,
     };
+
+    // Initialize AI players
+    aiPlayers = {};
+    allPlayers.forEach(p => {
+        if (p.ai) {
+            aiPlayers[p.id] = new AIPlayer(p.aiDifficulty || 'medium');
+        }
+    });
 
     setupHeatmap();
     renderArena();
@@ -401,6 +731,7 @@ function startGame(seed, mode, intensity, duration, pupsOn, theme) {
         gameState.running = true;
         startTimer();
         scheduleGlitch();
+        initWeather();
         startLoop();
         if (pupsOn) pickupInterval = setInterval(spawnPickup, PICKUP_SPAWN);
         if (mode === 'potato') potatoInterval = setInterval(tickPotato, 1000);
@@ -421,6 +752,7 @@ function clearTimers() {
     if (pickupInterval) clearInterval(pickupInterval);
     if (potatoInterval) clearInterval(potatoInterval);
     if (rageInterval) clearInterval(rageInterval);
+    clearWeather();
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('keyup', offKey);
 }
@@ -581,23 +913,44 @@ function renderHUD() {
     if (!gameState) return;
     const sb = $('score-board');
     sb.innerHTML = '';
-    gameState.players.forEach((p, i) => {
-        const c = PLAYER_COLORS[p.colorIdx];
-        const pill = document.createElement('div');
-        pill.className = 'score-pill';
-        pill.style.color = c.bg;
-        pill.style.borderColor = c.bg;
-        if (p.eliminated) pill.style.opacity = '0.3';
-        let extra = '';
-        if (p.isIt) extra = '<span class="tag-badge">IT</span>';
-        if (gameState.mode === 'infection' && p.infected) extra = '<span style="font-size:0.48rem;margin-left:2px;color:#cc44ff">INF</span>';
-        if (gameState.mode === 'potato' && gameState.potatoHolder === i) extra = '<span style="font-size:0.55rem;margin-left:2px">🥔</span>';
-        pill.innerHTML = `${p.name.slice(0, 4)}: ${p.score}${extra}`;
-        sb.appendChild(pill);
-    });
+    
+    if (gameState.isTeamMode) {
+        // Team mode display
+        const t1Score = gameState.teamScores[0] || 0;
+        const t2Score = gameState.teamScores[1] || 0;
+        sb.innerHTML = `
+            <div class="score-pill" style="color:#00ff88;border-color:#00ff88;">TEAM 1: ${t1Score}</div>
+            <div class="score-pill" style="color:#ff2255;border-color:#ff2255;">TEAM 2: ${t2Score}</div>
+        `;
+    } else {
+        // Individual mode display
+        gameState.players.forEach((p, i) => {
+            const c = PLAYER_COLORS[p.colorIdx];
+            const pill = document.createElement('div');
+            pill.className = 'score-pill';
+            pill.style.color = c.bg;
+            pill.style.borderColor = c.bg;
+            if (p.eliminated) pill.style.opacity = '0.3';
+            let extra = '';
+            if (p.isIt) extra = '<span class="tag-badge">IT</span>';
+            if (gameState.mode === 'infection' && p.infected) extra = '<span style="font-size:0.48rem;margin-left:2px;color:#cc44ff">INF</span>';
+            if (gameState.mode === 'potato' && gameState.potatoHolder === i) extra = '<span style="font-size:0.55rem;margin-left:2px">🥔</span>';
+            pill.innerHTML = `${p.name.slice(0, 4)}: ${p.score}${extra}`;
+            sb.appendChild(pill);
+        });
+    }
+    
     const itP = gameState.players.find(p => p.isIt);
-    $('it-display').textContent = 'IT: ' + (itP ? itP.name : '—');
-    $('it-display').style.color = itP ? PLAYER_COLORS[itP.colorIdx].bg : 'var(--muted)';
+    if (itP) {
+        $('it-display').textContent = 'IT: ' + itP.name;
+        $('it-display').style.color = PLAYER_COLORS[itP.colorIdx].bg;
+    } else if (gameState.isTeamMode) {
+        $('it-display').textContent = 'TEAMS: 1v1';
+        $('it-display').style.color = 'var(--accent)';
+    } else {
+        $('it-display').textContent = 'IT: —';
+        $('it-display').style.color = 'var(--muted)';
+    }
 }
 
 // ============================================
@@ -650,12 +1003,37 @@ function setupTouch() {
 }
 
 function getInput(p) {
+    // AI Player input
+    if (p.ai && aiPlayers[p.id]) {
+        const arena = getArena();
+        const input = aiPlayers[p.id].decide(p, gameState, arena);
+        return input;
+    }
+    
     const m = CTRL[p.scheme] || {};
     let dx = 0, dy = 0;
-    if (keysDown[m.up]) dy -= 1;
-    if (keysDown[m.down]) dy += 1;
-    if (keysDown[m.left]) dx -= 1;
-    if (keysDown[m.right]) dx += 1;
+    
+    // DIRECT keyboard checking
+    if (keysDown[m.up]) { dy -= 1; }
+    if (keysDown[m.down]) { dy += 1; }
+    if (keysDown[m.left]) { dx -= 1; }
+    if (keysDown[m.right]) { dx += 1; }
+    
+    // Log only on human player with movement
+    if (dx || dy) {
+        if (Math.random() < 0.02) {
+            console.log('getInput for human:', { scheme: p.scheme, m, keys_checked: [m.up, m.down, m.left, m.right], keysDown_values: [keysDown[m.up], keysDown[m.down], keysDown[m.left], keysDown[m.right]], result: {dx, dy} });
+        }
+    }
+    
+    // Detect double-tap dashes for human players (but still allow movement)
+    if (!p.ai && p.scheme !== 'net') {
+        if (keysDown[m.up]) attemptDash(p, 'up');
+        if (keysDown[m.down]) attemptDash(p, 'down');
+        if (keysDown[m.left]) attemptDash(p, 'left');
+        if (keysDown[m.right]) attemptDash(p, 'right');
+    }
+    
     if (p.scheme === 'wasd' && (Math.abs(touchVec.x) > 0.1 || Math.abs(touchVec.y) > 0.1)) {
         dx = touchVec.x;
         dy = touchVec.y;
@@ -667,11 +1045,68 @@ function getInput(p) {
     return { dx, dy };
 }
 
+// ============================================
+// DASH MECHANIC
+// ============================================
+const DASH_CONFIG = {
+    cooldown: 1200,      // ms between dashes
+    duration: 300,       // how long the dash lasts (ms)
+    speed: 12,           // dash speed multiplier
+    doubleTapWindow: 300 // ms to detect double-tap
+};
+
+function attemptDash(p, dirKey) {
+    if (p.dashCooldown > 0 || p.isDashing) return false;
+    
+    const now = Date.now();
+    const key = `${p.id}_${dirKey}`;
+    
+    if (!keyPressTimings[key]) {
+        keyPressTimings[key] = now;
+        return false;
+    }
+    
+    const timeSinceLastPress = now - keyPressTimings[key];
+    if (timeSinceLastPress < DASH_CONFIG.doubleTapWindow) {
+        // Double-tap detected!
+        keyPressTimings[key] = 0;
+        triggerDash(p, dirKey);
+        return true;
+    }
+    
+    keyPressTimings[key] = now;
+    return false;
+}
+
+function triggerDash(p, dirKey) {
+    const dirMap = { 'up': { x: 0, y: -1 }, 'down': { x: 0, y: 1 }, 'left': { x: -1, y: 0 }, 'right': { x: 1, y: 0 } };
+    const dir = dirMap[dirKey] || { x: 0, y: 0 };
+    const len = Math.hypot(dir.x, dir.y) || 1;
+    
+    p.isDashing = true;
+    p.dashDir = { x: dir.x / len, y: dir.y / len };
+    p.dashCooldown = DASH_CONFIG.cooldown;
+    
+    sfxDash();
+    spawnParticles(p.x + PW / 2, p.y + PH / 2, '#44ffcc', 12);
+    
+    setTimeout(() => {
+        p.isDashing = false;
+    }, DASH_CONFIG.duration);
+}
+
+function sfxDash() {
+    playTone(1000, 'sine', 0.08, 0.3);
+    playTone(1400, 'sine', 0.1, 0.2, 0.05);
+}
+
 function loop(ts) {
-    if (!gameState || !gameState.running) return;
+    if (!lastTime) lastTime = ts;
     const dt = Math.min(ts - lastTime, 50);
     lastTime = ts;
-    if (!paused) update(dt);
+    if (gameState && gameState.running && !paused) {
+        update(dt);
+    }
     animId = requestAnimationFrame(loop);
 }
 
@@ -682,22 +1117,78 @@ function update(dt) {
     const doTrail = trailAccum > 45;
     if (doTrail) trailAccum = 0;
 
-    gameState.players.forEach(p => {
+    gameState.players.forEach((p, idx) => {
         if (p.net || p.frozen || p.eliminated) return;
-        const { dx, dy } = getInput(p);
-        let spd = SPEED * (p._speedMult || 1);
-        if (p.isIt && p.rageLevel >= 100) spd *= 1.6;
-        const cx = p.x + PW / 2, cy = p.y + PH / 2;
-        zones.forEach(z => {
-            const zx = z.px * arena.w, zy = z.py * arena.h, zw = z.pw * arena.w, zh = z.ph * arena.h;
-            if (cx > zx && cx < zx + zw && cy > zy && cy < zy + zh) {
-                if (z.type === 'boost') spd *= 1.65;
-                if (z.type === 'slow') spd *= 0.45;
-            }
-        });
-        let nx = p.x + dx * spd, ny = p.y + dy * spd;
+        let { dx, dy } = getInput(p);
+        
+        // Normalize movement vector if there's input
+        const mag = Math.hypot(dx, dy);
+        if (mag > 0.1) {
+            dx /= mag;
+            dy /= mag;
+        }
+        
+        // Update cooldowns
+        p.dashCooldown = Math.max(0, p.dashCooldown - dt);
+        
+        // Calculate movement based on state
+        let moveX = 0, moveY = 0;
+        
+        if (p.isDashing && mag > 0.1) {
+            // DASH STATE: use dash direction and speed
+            moveX = p.dashDir.x * DASH_CONFIG.speed;
+            moveY = p.dashDir.y * DASH_CONFIG.speed;
+        } else if (mag > 0.1) {
+            // MOVING STATE: apply normalized direction * speed + momentum
+            const baseMoveX = dx * SPEED;
+            const baseMoveY = dy * SPEED;
+            
+            // Accumulate momentum
+            p.momentum.x = p.momentum.x * 0.9 + baseMoveX * 0.1;
+            p.momentum.y = p.momentum.y * 0.9 + baseMoveY * 0.1;
+            
+            moveX = baseMoveX + p.momentum.x * 0.1;
+            moveY = baseMoveY + p.momentum.y * 0.1;
+            
+            // Apply modifiers
+            let modSpd = p._speedMult || 1;
+            if (p.isIt && p.rageLevel >= 100) modSpd *= 1.6;
+            if (currentWeather && currentWeather.friction) modSpd *= currentWeather.friction;
+            
+            moveX *= modSpd;
+            moveY *= modSpd;
+            
+            // Zone effects
+            const cx = p.x + PW / 2, cy = p.y + PH / 2;
+            zones.forEach(z => {
+                const zx = z.px * arena.w, zy = z.py * arena.h, zw = z.pw * arena.w, zh = z.ph * arena.h;
+                if (cx > zx && cx < zx + zw && cy > zy && cy < zy + zh) {
+                    if (z.type === 'boost') { moveX *= 1.65; moveY *= 1.65; }
+                    if (z.type === 'slow') { moveX *= 0.45; moveY *= 0.45; }
+                }
+            });
+            
+            // Weather effects (after all multipliers)
+            if (currentWeather && currentWeather.gravity) moveY += 0.5 * SPEED;
+        } else {
+            // NO INPUT: coast with momentum only
+            p.momentum.x *= 0.85;
+            p.momentum.y *= 0.85;
+            moveX = p.momentum.x;
+            moveY = p.momentum.y;
+        }
+        
+        let nx = p.x + moveX;
+        let ny = p.y + moveY;
+        
+        // DEBUG
+        if (idx === 0 && Math.random() < 0.05) {
+            console.log(`P${idx}: input_mag=${mag.toFixed(2)}, dash=${p.isDashing}, move=[${moveX.toFixed(1)},${moveY.toFixed(1)}], pos=[${nx.toFixed(0)},${ny.toFixed(0)}]`);
+        }
+        
         nx = Math.max(0, Math.min(arena.w - PW, nx));
         ny = Math.max(0, Math.min(arena.h - PH, ny));
+        
         if (!p.ghosted) {
             obstacles.forEach(o => {
                 const ox = o.px * arena.w, oy = o.py * arena.h, ow = o.pw * arena.w, oh = o.ph * arena.h;
@@ -712,16 +1203,21 @@ function update(dt) {
                 }
             });
         }
+        
         p.x = nx;
         p.y = ny;
-        if (doTrail && (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1)) {
+        
+        if (doTrail && (Math.abs(moveX) > 0.1 || Math.abs(moveY) > 0.1)) {
             spawnTrail(p);
             paintHeat(p);
         }
+        
         const el = document.getElementById('player_' + p.id);
         if (el) {
             el.style.left = p.x + 'px';
             el.style.top = p.y + 'px';
+            if (p.isDashing) el.classList.add('dashing');
+            else el.classList.remove('dashing');
         }
     });
 
@@ -901,6 +1397,24 @@ function checkTags(now) {
         });
         return;
     }
+    if (['team2v2', 'ctf', 'koth'].includes(mode)) {
+        // Team modes - tag only enemy team members
+        gameState.players.forEach(p => {
+            if (p.frozen || p.eliminated) return;
+            gameState.players.forEach(opponent => {
+                if (opponent.team === p.team || opponent.frozen || opponent.eliminated) return; // Same team or already dead
+                if (now - opponent.lastTagTime < TAG_COOL || now - p.lastTagTime < TAG_COOL) return;
+                if (Math.abs(p.x - opponent.x) < PW && Math.abs(p.y - opponent.y) < PH) {
+                    if (opponent.shield) {
+                        blockShield(opponent);
+                        return;
+                    }
+                    applyTeamTag(p, opponent);
+                }
+            });
+        });
+        return;
+    }
     // Classic + Potato
     const itP = gameState.players.find(p => p.isIt);
     if (!itP) return;
@@ -1073,6 +1587,29 @@ function applyTag(taggedId, taggerId) {
         el.className = 'player-el' + (p.isIt ? ' is-it' : '') + (p.ghosted ? ' ghosted' : '') + (p.shield ? ' shielded' : '');
     });
     $('combo-display').textContent = tagger.streak > 1 ? `${tagger.name} ×${tagger.streak} STREAK` : '';
+}
+
+function applyTeamTag(tagger, tagged) {
+    sfxTag();
+    tagger.score++;
+    tagger.tagsMade++;
+    tagged.tagsTaken++;
+    gameState.teamScores[tagger.team] = (gameState.teamScores[tagger.team] || 0) + 1;
+    matchStats.totalTags++;
+    const now = Date.now();
+    tagged.lastTagTime = now;
+    tagger.lastTagTime = now;
+    
+    spawnParticles(tagged.x, tagged.y, PLAYER_COLORS[tagger.colorIdx].bg, 10);
+    addKillFeed(tagger, tagged, 'TAGGED');
+    renderHUD();
+    screenShake(160);
+    
+    // Check for team mode win conditions
+    if (gameState.teamScores[tagger.team] >= 10) {
+        log(`// TEAM ${tagger.team + 1} WINS!`);
+        endGame();
+    }
 }
 
 function blockShield(runner) {
@@ -1256,6 +1793,101 @@ function screenShake(dur) {
     const w = $('arena-wrap');
     w.classList.add('shaking');
     setTimeout(() => w.classList.remove('shaking'), dur);
+}
+
+// ============================================
+// WEATHER SYSTEM
+// ============================================
+const WEATHER_TYPES = [
+    { id: 'rain', name: 'RAIN', effect: 'Slippery movement', friction: 0.7 },
+    { id: 'fog', name: 'FOG', effect: 'Reduced visibility', visibility: 0.6 },
+    { id: 'storm', name: 'STORM', effect: 'Lightning strikes', stun: true },
+    { id: 'gravity', name: 'GRAVITY FLUX', effect: 'Unstable gravity', gravity: true }
+];
+
+function initWeather() {
+    if (Math.random() > 0.6) return; // 40% chance for weather
+    currentWeather = WEATHER_TYPES[Math.floor(Math.random() * WEATHER_TYPES.length)];
+    log(`// WEATHER: ${currentWeather.name} INCOMING`);
+    
+    const weatherEl = document.createElement('div');
+    weatherEl.id = 'weather-indicator';
+    weatherEl.style.cssText = 'position:absolute;top:30px;right:60px;font-size:0.65rem;color:var(--warn);z-index:10;font-family:Orbitron;letter-spacing:0.1em;';
+    weatherEl.textContent = `☁️ ${currentWeather.name}: ${currentWeather.effect}`;
+    $('arena-inner').appendChild(weatherEl);
+    
+    if (currentWeather.id === 'storm') {
+        weatherInterval = setInterval(strikeLightning, 2000);
+    }
+    if (currentWeather.id === 'fog') {
+        $('arena-inner').classList.add('fog-effect');
+    }
+    if (currentWeather.id === 'rain') {
+        spawnRain();
+    }
+}
+
+function strikeLightning() {
+    if (!gameState || !gameState.running) return;
+    const arena = getArena();
+    const strikex = Math.random() * arena.w;
+    const strikey = Math.random() * arena.h;
+    
+    const bolt = document.createElement('div');
+    bolt.style.cssText = `position:absolute;left:${strikex}px;top:${strikey}px;width:20px;height:80px;background:radial-gradient(circle,#ffff00,#fff,transparent);z-index:5;opacity:0.8;pointer-events:none;`;
+    $('arena-inner').appendChild(bolt);
+    
+    sfxStrike();
+    spawnParticles(strikex, strikey, '#ffff00', 10);
+    screenShake(150);
+    
+    // Stun nearby players
+    gameState.players.forEach(p => {
+        if (p.eliminated) return;
+        const dist = Math.hypot(p.x + PW/2 - strikex, p.y + PH/2 - strikey);
+        if (dist < 100) {
+            p.frozen = true;
+            const el = document.getElementById('player_' + p.id);
+            if (el) el.classList.add('frozen');
+            setTimeout(() => {
+                p.frozen = false;
+                if (el) el.classList.remove('frozen');
+            }, 1500);
+        }
+    });
+    
+    setTimeout(() => bolt.remove(), 200);
+}
+
+function sfxStrike() {
+    playTone(200, 'sawtooth', 0.1, 0.4);
+    playTone(400, 'sawtooth', 0.15, 0.3, 0.08);
+}
+
+function spawnRain() {
+    const arena = getArena();
+    for (let i = 0; i < 15; i++) {
+        const drop = document.createElement('div');
+        drop.style.cssText = `position:absolute;left:${Math.random() * arena.w}px;top:${Math.random() * arena.h}px;width:2px;height:10px;background:#00ccff;opacity:0.6;`;
+        $('arena-inner').appendChild(drop);
+        
+        let y = parseInt(drop.style.top);
+        const tick = () => {
+            y += 5;
+            drop.style.top = y + 'px';
+            if (y < arena.h) requestAnimationFrame(tick);
+            else drop.remove();
+        };
+        tick();
+    }
+}
+
+function clearWeather() {
+    if (weatherInterval) clearInterval(weatherInterval);
+    currentWeather = null;
+    const indicator = document.getElementById('weather-indicator');
+    if (indicator) indicator.remove();
+    $('arena-inner').classList.remove('fog-effect');
 }
 
 // ============================================
@@ -1524,6 +2156,27 @@ function showResults() {
         $('winner-list').appendChild(row);
     });
 
+    // Check Achievements
+    if (!tutorialMode && sorted.length > 0) {
+        const mvp = sorted[0];
+        const matchResults = {
+            tags: mvp.tagsMade || 0,
+            longestStreak: matchStats.longestStreak,
+            pickups: matchStats.pickups,
+            mode: gameState.mode,
+            survived: !mvp.eliminated,
+            won: mvp === sorted[0]
+        };
+        const newAchievements = achievementSystem.checkAchievements(matchResults);
+        if (newAchievements.length > 0) {
+            log(`// 🏆 UNLOCKED: ${newAchievements.join(', ')}`);
+        }
+        achievementSystem.stats.totalTags += matchStats.totalTags;
+        achievementSystem.stats.roundsPlayed++;
+        achievementSystem.stats.pickupsCollected += matchStats.pickups;
+        achievementSystem.save();
+    }
+
     // Awards
     const awards = [];
     const topTagger = sorted.reduce((a, b) => a.tagsMade > b.tagsMade ? a : b);
@@ -1592,7 +2245,9 @@ window.addEventListener('resize', () => {
 });
 
 // ============================================
+// ============================================
 // BOOT
 // ============================================
+loadGraphicsSettings();
 updateLobby();
 startTitleGlitch();
