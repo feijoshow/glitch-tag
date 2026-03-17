@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>GLITCH TAG • PEAK v4</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <button id="sound-btn">🔊 SFX</button>
+
+    <div class="logo-wrap">
+        <h1 id="main-title">
+            <span>G</span><span>L</span><span>I</span><span>T</span><span>C</span><span>H</span>
+            <span>&nbsp;</span>
+            <span>T</span><span>A</span><span>G</span>
+        </h1>
+    </div>
+    <p class="tagline">// v4.0 — ULTIMATE EDITION — UP TO 8 PLAYERS</p>
+
+    <!-- LOBBY SCREEN -->
+    <div id="lobby-screen" class="screen active">
+        <div class="player-slots" id="player-slots"></div>
+
+        <!-- Session Leaderboard -->
+        <div id="leaderboard-section" style="display:none;">
+            <div class="card" style="max-width:660px; width:100%; margin-bottom:0.8rem;">
+                <div class="card-title">// SESSION LEADERBOARD</div>
+                <div id="lb-rows"></div>
+            </div>
+        </div>
+
+        <div class="lobby-grid">
+            <div class="card">
+                <div class="card-title">// ADD LOCAL PLAYER</div>
+                <label>NAME</label>
+                <input type="text" id="player-name-input" maxlength="9" placeholder="ENTER NAME">
+                <label>CONTROLS</label>
+                <select id="control-scheme">
+                    <option value="wasd">WASD — Player 1</option>
+                    <option value="arrows">ARROWS — Player 2</option>
+                    <option value="ijkl">IJKL — Player 3</option>
+                    <option value="numpad">NUMPAD — Player 4</option>
+                </select>
+                <button class="btn btn-accent" id="add-local-btn">+ ADD PLAYER</button>
+            </div>
+
+            <div class="card">
+                <div class="card-title">// NETWORK</div>
+                <label>ROOM CODE</label>
+                <div class="room-code" id="room-code-display">——————</div>
+                <button class="btn btn-accent" id="gen-room-btn">HOST ROOM</button>
+                <div style="border-top:1px solid var(--border); padding-top:0.55rem;">
+                    <label>JOIN ROOM</label>
+                    <div class="inline-row" style="margin-top:0.3rem;">
+                        <input type="text" id="join-code-input" maxlength="6" placeholder="A1B2C3" style="letter-spacing:0.3em; text-transform:uppercase;">
+                        <button class="btn btn-warn" id="join-room-btn">JOIN</button>
+                    </div>
+                </div>
+                <div id="net-status" style="font-size:0.58rem; color:var(--muted); min-height:14px;"></div>
+            </div>
+        </div>
+
+        <!-- Settings -->
+        <div class="card" style="max-width:660px; width:100%; margin-bottom:0.8rem;">
+            <div class="card-title">// GAME SETTINGS</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.6rem; margin-bottom:0.4rem;">
+                <div>
+                    <label>GAME MODE</label>
+                    <select id="game-mode">
+                        <option value="classic">Classic Tag</option>
+                        <option value="infection">Infection</option>
+                        <option value="potato">Hot Potato</option>
+                        <option value="assassin">Assassin</option>
+                    </select>
+                </div>
+                <div>
+                    <label>ARENA THEME</label>
+                    <select id="arena-theme">
+                        <option value="">Void</option>
+                        <option value="theme-neon">Neon City</option>
+                        <option value="theme-inferno">Inferno</option>
+                        <option value="theme-ice">Ice Lab</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.6rem;">
+                <div>
+                    <label>DURATION</label>
+                    <select id="round-duration">
+                        <option value="60">1 min</option>
+                        <option value="120" selected>2 min</option>
+                        <option value="180">3 min</option>
+                        <option value="300">5 min</option>
+                    </select>
+                </div>
+                <div>
+                    <label>GLITCH RATE</label>
+                    <select id="glitch-intensity">
+                        <option value="low">LOW</option>
+                        <option value="medium" selected>MEDIUM</option>
+                        <option value="high">HIGH</option>
+                        <option value="insane">INSANE</option>
+                    </select>
+                </div>
+                <div>
+                    <label>POWERUPS</label>
+                    <select id="powerup-setting">
+                        <option value="on" selected>ON</option>
+                        <option value="off">OFF</option>
+                    </select>
+                </div>
+            </div>
+            <div id="mode-desc" style="font-size:0.6rem; color:var(--muted); padding:0.3rem 0; border-top:1px solid var(--border); margin-top:0.2rem;"></div>
+        </div>
+
+        <!-- Controls & Powerups -->
+        <div class="card" style="max-width:660px; width:100%; margin-bottom:0.9rem; font-size:0.62rem; gap:0.5rem;">
+            <div class="card-title">// CONTROLS & POWERUPS</div>
+            <div style="display:flex; gap:1rem; flex-wrap:wrap; line-height:1.9;">
+                <span>P1: <span style="color:var(--warn)">WASD</span></span>
+                <span>P2: <span style="color:var(--warn)">ARROWS</span></span>
+                <span>P3: <span style="color:var(--warn)">IJKL</span></span>
+                <span>P4: <span style="color:var(--warn)">NUMPAD 8456</span></span>
+            </div>
+            <div style="display:flex; gap:0.8rem; flex-wrap:wrap; line-height:2; border-top:1px solid var(--border); padding-top:0.4rem;">
+                <span>🛡️ Shield</span><span style="color:var(--muted)">blocks 1 tag</span>
+                <span>❄️ Freeze</span><span style="color:var(--muted)">stops all others</span>
+                <span>👻 Ghost</span><span style="color:var(--muted)">pass through walls</span>
+                <span>🧲 Magnet</span><span style="color:var(--muted)">pull runners</span>
+                <span>💣 Bomb</span><span style="color:var(--muted)">force IT swap</span>
+                <span>🔫 Shot</span><span style="color:var(--muted)">fire a tag bullet</span>
+                <span>🪄 Decoy</span><span style="color:var(--muted)">fake you at spot</span>
+            </div>
+        </div>
+
+        <button class="btn btn-accent" id="start-btn" disabled style="font-family:'Orbitron',sans-serif; font-size:0.9rem; letter-spacing:0.2em; padding:0.65rem 2.2rem; margin-bottom:0.4rem;">START GAME</button>
+        <div id="lobby-msg" style="font-size:0.62rem; color:var(--muted);">Need at least 2 players</div>
+    </div>
+
+    <!-- GAME SCREEN -->
+    <div id="game-screen" class="screen">
+        <div class="game-hud">
+            <div class="hud-left">
+                <div class="timer-display" id="timer-display">2:00</div>
+                <div id="mode-badge-hud" class="mode-badge">CLASSIC</div>
+                <div class="score-board" id="score-board"></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.7rem;">
+                <div id="rage-wrap" style="display:none;">
+                    <span>RAGE</span>
+                    <div id="rage-bar-bg"><div id="rage-bar"></div></div>
+                </div>
+                <div class="it-label" id="it-display">IT: —</div>
+            </div>
+        </div>
+
+        <div id="arena-wrap">
+            <div id="arena">
+                <div id="arena-inner">
+                    <canvas id="heatmap-canvas"></canvas>
+                    <div class="glitch-banner" id="glitch-banner">GLITCH</div>
+                    <div id="kill-feed"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="glitch-log">// SYSTEM STABLE</div>
+        <div class="game-footer">
+            <button class="btn btn-muted" id="pause-btn" style="font-size:0.68rem;">PAUSE</button>
+            <button class="btn btn-danger" id="end-btn" style="font-size:0.68rem;">END</button>
+            <div id="combo-display"></div>
+        </div>
+    </div>
+
+    <!-- RESULT MODAL -->
+    <div class="modal-bg" id="result-modal" style="display:none;">
+        <div class="modal">
+            <h2>ROUND COMPLETE</h2>
+            <div id="mvp-banner" style="text-align:center; font-size:0.72rem; color:var(--warn); min-height:18px;"></div>
+            <div class="winner-list" id="winner-list"></div>
+            <div class="award-row" id="award-row"></div>
+            <div id="match-stats" style="font-size:0.58rem; color:var(--muted); border-top:1px solid var(--border); padding-top:0.55rem; display:flex; gap:0.8rem; flex-wrap:wrap; justify-content:center; text-align:center;"></div>
+            <div style="display:flex; gap:0.5rem;">
+                <button class="btn btn-accent" id="play-again-btn" style="flex:1;">PLAY AGAIN</button>
+                <button class="btn btn-muted" id="back-lobby-btn" style="flex:1;">LOBBY</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
